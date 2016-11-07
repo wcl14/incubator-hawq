@@ -2522,7 +2522,7 @@ CreaateAoRowSegFileForRelationOnMaster(Relation rel,
 		{
 			InsertInitialSegnoEntry(aoEntry, segno);
 		}
-		else if (fsinfo->eof != 0)
+		else if (fsinfo->eof >= 0)
 		{
 			pfree(fsinfo);
 			continue;
@@ -2605,7 +2605,7 @@ CreateParquetSegFileForRelationOnMaster(Relation rel,
 		{
 			InsertInitialParquetSegnoEntry(aoEntry, segno);
 		}
-		else if (fsinfo->eof != 0)
+		else if (fsinfo->eof >= 0)
 		{
 			pfree(fsinfo);
 			continue;
