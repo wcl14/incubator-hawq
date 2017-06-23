@@ -143,7 +143,7 @@ ExecScan(ScanState *node,
 		TupleTableSlot *slot;
 
 		CHECK_FOR_INTERRUPTS();
-
+        //TODO: interma pass qual (to node)
 		slot = (*accessMtd) (node);
 
 		/*

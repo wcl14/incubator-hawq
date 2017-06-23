@@ -207,6 +207,7 @@ consume(ParquetColumnReader *columnReader)
 
 		/* read next page */
 		columnReader->currentPage = &columnReader->dataPages[columnReader->dataPageProcessed];
+		//TODO: interma currentPage->header
 		decodeCurrentPage(columnReader);
 
 		columnReader->currentPageValueRemained = columnReader->currentPage->header->num_values;

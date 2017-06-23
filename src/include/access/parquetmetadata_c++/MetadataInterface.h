@@ -64,6 +64,13 @@ typedef enum PageType
   DICTIONARY_PAGE = 2
 } PageType;
 
+typedef struct Statistics_4C {
+	char *max;
+	char *min;
+	int64_t null_count;
+	int64_t distinct_count;
+} Statistics_4C;
+
 /**
  * the field description, maybe a primitive type, or a group type corresponding to a nested type.
  * For primitive type, num_children equals 0, and children points to NULL;
@@ -154,6 +161,8 @@ typedef struct PageMetadata_4C
     /* Compressed page size in bytes (not including this header) */
 	int32_t compressed_page_size;
 	int32_t crc;
+	/* page statistics */
+	Statistics_4C *stats;
 } PageMetadata_4C;
 
 

@@ -12,7 +12,7 @@ subdir = src/backend/access/parquet/metadatautil_c++
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 
-CXXFLAGS += -DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H $(subst -Wmissing-prototypes,,$(subst -std=gnu99,,$(CFLAGS)))
+CXXFLAGS += -std=c++11 -DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H $(subst -Wmissing-prototypes,,$(subst -std=gnu99,,$(CFLAGS)))
 #override CPPFLAGS := -I$(top_srcdir)/src/backend/gp_libpq_fe $(CPPFLAGS)
 
 

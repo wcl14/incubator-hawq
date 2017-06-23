@@ -160,6 +160,22 @@ enum PageType {
   DICTIONARY_PAGE = 2;
 }
 
+
+/**
+ * Statistics per row group and per page
+ * All fields are optional.
+ */
+struct Statistics {
+   /** min and max value of the column, encoded in PLAIN encoding */
+   1: optional binary max;
+   2: optional binary min;
+   /** count of null value in the column */
+   3: optional i64 null_count;
+   /** count of distinct values occurring */
+   4: optional i64 distinct_count;
+}
+
+
 /** Data page header */
 struct DataPageHeader {
   /** Number of values, including NULLs, in this data page. **/
@@ -173,7 +189,12 @@ struct DataPageHeader {
 
   /** Encoding used for repetition levels **/
   4: required Encoding repetition_level_encoding;
+
+  /** Optional statistics for the data in this page**/
+  5: optional Statistics statistics;
 }
+
+
 
 struct IndexPageHeader {
   /** TODO: **/
@@ -253,6 +274,9 @@ struct ColumnMetaData {
 
   /** Byte offset from the beginning of file to first (only) dictionary page **/
   11: optional i64 dictionary_page_offset
+
+  /** optional statistics for this column chunk */
+  12: optional Statistics statistics;
 }
 
 struct ColumnChunk {
