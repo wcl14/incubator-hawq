@@ -147,6 +147,27 @@ MetadataUtil::convertPageMetadata(parquet::PageHeader& parquetHeader,
 	hawqPageMetadata->repetition_level_encoding =
 			(enum Encoding) parquetHeader.data_page_header.repetition_level_encoding;
 	hawqPageMetadata->num_values = parquetHeader.data_page_header.num_values;
+
+	if (parquetHeader.data_page_header.__isset.statistics) {
+		hawqPageMetadata->stats.is_existed = true;
+		hawqPageMetadata->stats.distinct_count = parquetHeader.data_page_header.statistics.distinct_count;
+		hawqPageMetadata->stats.null_count = parquetHeader.data_page_header.statistics.null_count;
+
+        //TODO: interma add int32/64 support
+        char buf[4];
+        int64_t i = 0;
+
+        memset(buf, 0, sizeof(buf));
+        memcpy(buf, parquetHeader.data_page_header.statistics.max.data(), sizeof(buf));
+        i = (*(int32_t *)buf);
+		hawqPageMetadata->stats.max = i;
+
+        memset(buf, 0, sizeof(buf));
+        memcpy(buf, parquetHeader.data_page_header.statistics.min.data(), sizeof(buf));
+        i = (*(int32_t *)buf);
+        hawqPageMetadata->stats.min = i;
+        ;
+	}
 }
 
 /*

@@ -207,7 +207,21 @@ consume(ParquetColumnReader *columnReader)
 
 		/* read next page */
 		columnReader->currentPage = &columnReader->dataPages[columnReader->dataPageProcessed];
+
 		//TODO: interma currentPage->header
+		if (columnReader->currentPage->header->stats.is_existed) {
+			// skip by stats
+			int64_t	dummy_qual = 1500;
+			if (dummy_qual > columnReader->currentPage->header->stats.max ||
+					dummy_qual < columnReader->currentPage->header->stats.min ) {
+
+				columnReader->dataPageProcessed++;
+
+				consume(columnReader);
+				return;
+			}
+		}
+
 		decodeCurrentPage(columnReader);
 
 		columnReader->currentPageValueRemained = columnReader->currentPage->header->num_values;

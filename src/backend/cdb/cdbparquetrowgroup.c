@@ -212,6 +212,7 @@ ParquetRowGroupReader_ScanNextTuple(
 
 	if (rowGroupReader->rowRead >= rowGroupReader->rowCount)
 	{
+		//TODO: interma 一起consume?齐步走（不行，因为每个column的page数目不一定一样，但tuplecount一定一致）
 		ParquetRowGroupReader_FinishedScanRowGroup(rowGroupReader);
 		return false;
 	}

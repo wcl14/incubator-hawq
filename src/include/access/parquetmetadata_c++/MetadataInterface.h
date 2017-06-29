@@ -65,8 +65,13 @@ typedef enum PageType
 } PageType;
 
 typedef struct Statistics_4C {
-	char *max;
-	char *min;
+	bool is_existed;
+
+	//char *max;
+	//char *min;
+	int64_t max;
+	int64_t min;
+
 	int64_t null_count;
 	int64_t distinct_count;
 } Statistics_4C;
@@ -162,7 +167,7 @@ typedef struct PageMetadata_4C
 	int32_t compressed_page_size;
 	int32_t crc;
 	/* page statistics */
-	Statistics_4C *stats;
+	Statistics_4C stats;
 } PageMetadata_4C;
 
 
