@@ -614,6 +614,9 @@ bool   pxf_enable_stat_collection = true;
 int    pxf_stat_max_fragments = 100;
 bool   pxf_enable_locality_optimizations = true;
 bool   pxf_isilon = false; /* temporary GUC */
+
+bool enable_parquet_stats = false;
+
 int    pxf_service_port = 51200; /* temporary GUC */
 char   *pxf_service_address = "localhost:51200"; /* temporary GUC */
 bool   pxf_service_singlecluster = false;
@@ -4280,6 +4283,16 @@ static struct config_bool ConfigureNamesBool[] =
 		},
 		&pxf_isilon,
 		false, NULL, NULL
+    },
+
+    {
+            {"enable_parquet_stats", PGC_USERSET, CUSTOM_OPTIONS,
+             gettext_noop("whether enable_parquet_stats"),
+             NULL,
+             GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
+            },
+            &enable_parquet_stats,
+            false, NULL, NULL
     },
 
 	{

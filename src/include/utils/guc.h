@@ -498,6 +498,10 @@ extern bool   pxf_enable_locality_optimizations; /* turn locality optimization i
  * Is Isilon the target storage system ?
  */
 extern bool   pxf_isilon;
+
+extern bool enable_parquet_stats;
+
+
 /*
  * PXF service port. Default value (for tcserver) 51200.
  * This GUC can be changed only on startup.
