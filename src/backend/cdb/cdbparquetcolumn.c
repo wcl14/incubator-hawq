@@ -210,6 +210,7 @@ consume(ParquetColumnReader *columnReader)
 
 		//TODO: interma currentPage->header
 		if (columnReader->currentPage->header->stats.is_existed) {
+            /*
 			// skip by stats
 			int64_t	dummy_qual = 1500;
 			if (dummy_qual > columnReader->currentPage->header->stats.max ||
@@ -220,6 +221,7 @@ consume(ParquetColumnReader *columnReader)
 				consume(columnReader);
 				return;
 			}
+            */
 		}
 
 		decodeCurrentPage(columnReader);

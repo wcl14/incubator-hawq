@@ -1154,6 +1154,7 @@ agg_retrieve_scalar(AggState *aggstate)
         /*
          * We loop through input tuples, and compute the aggregates.
          */
+		//TODO interma do aggregate
         while (!aggstate->agg_done)
         {
                 ExprContext *tmpcontext = aggstate->tmpcontext;

@@ -29,6 +29,7 @@
 #include "access/parquetmetadata_c++/MetadataInterface.h"
 #include "lib/stringinfo.h"
 #include "postgres.h"
+#include <stdlib.h>
 
 /** The deserialize part functions*/
 static int
@@ -636,7 +637,7 @@ readRowGroupInfo(
 }
 
 /**
- * read column chunk information
+ * read column chunk information //@interma
  */
 int
 readColumnChunk(
@@ -689,6 +690,63 @@ readColumnChunk(
 				(errcode(ERRCODE_GP_INTERNAL_ERROR), errmsg("file metadata: row group column chunk fileoffset not set")));
 	return xfer;
 
+}
+
+//@interma added
+static int
+readStats(
+        CompactProtocol *prot,
+        struct Statistics_4C *stats)
+{
+    uint32_t xfer = 0;
+    TType ftype;
+    int16_t fid;
+
+    readStructBegin(prot);
+    stats->is_existed = true;
+
+    while (true) {
+        xfer += readFieldBegin(prot, &ftype, &fid);
+        if (ftype == T_STOP) {
+            break;
+        }
+        switch (fid) {
+            case 1:
+                if (ftype == T_STRING) {
+                    char *temp;
+                    uint32_t len = readString(prot, &temp);
+                    xfer += len;
+                    stats->max = (*(int32_t *)temp);
+                }
+                break;
+            case 2:
+                if (ftype == T_STRING) {
+                    char *temp;
+                    uint32_t len = readString(prot, &temp);
+                    xfer += len;
+                    stats->min = (*(int32_t *)temp);
+                }
+                break;
+            case 3:
+                if (ftype == T_I64) {
+                    xfer += readI64(prot, &(stats->null_count));
+                }
+                break;
+            case 4:
+                if (ftype == T_I64) {
+                    xfer += readI64(prot, &(stats->distinct_count));
+                }
+                break;
+            default:
+                ereport(ERROR,
+                        (errcode(ERRCODE_GP_INTERNAL_ERROR), errmsg("column stats metadata failed")));
+                break;
+        }
+    }
+
+    readStructEnd(prot);
+
+    return xfer;
 }
 
 /**
@@ -819,9 +877,9 @@ readColumnMetadata(
 			}
 			break;
 		case 12:
-			/* Skip this optional field now */
+			/* Skip this optional field now */ //@interma stats field
 			if (ftype == T_STRUCT) {
-				xfer += skipType(prot, ftype);
+                xfer += readStats(prot, &(colChunk->stats));
 			}
 			break;
 		case 13:

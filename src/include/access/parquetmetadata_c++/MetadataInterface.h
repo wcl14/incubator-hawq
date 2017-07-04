@@ -122,6 +122,9 @@ typedef struct ColumnChunkMetadata_4C
     /* total byte size of all uncompressed pages in this column chunk (including the headers) */
 	int64_t totalUncompressedSize;
 
+	/* page statistics */
+	Statistics_4C stats;
+
 } ColumnChunkMetadata_4C;
 
 /* rowgroup metadata */
