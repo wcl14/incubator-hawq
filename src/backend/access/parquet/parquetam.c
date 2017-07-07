@@ -54,6 +54,8 @@ static bool SetNextFileSegForRead(ParquetScanDesc scan);
 
 /*get next row group to read*/
 static bool getNextRowGroup(ParquetScanDesc scan);
+static bool getNextRowGroupWithFilter(ParquetScanDesc scan, TupleTableSlot *slot, ScanState *node, bool *isfiltered);
+static bool dofilter(TupleTableSlot *slot, ParquetRowGroupReader *rowGroupReader, ScanState *node);
 
 /*close current scanning file segments*/
 static void CloseScannedFileSeg(ParquetScanDesc scan);
@@ -261,7 +263,77 @@ void parquet_endscan(ParquetScanDesc scan) {
 }
 
 void parquet_getnext(ParquetScanDesc scan, ScanDirection direction,
-		TupleTableSlot *slot) {
+                                TupleTableSlot *slot) {
+
+    AOTupleId aoTupleId;
+    Assert(ScanDirectionIsForward(direction));
+
+#ifdef FAULT_INJECTOR
+    FaultInjector_InjectFaultIfSet(
+            FailQeWhenParquetGetNext,
+            DDLNotSpecified,
+            "",	// databaseName
+            ""); // tableName
+#endif
+
+    bool isfiltered = false;
+    for(;;)
+    {
+        if(scan->bufferDone)
+        {
+            /*
+             * Get the next row group. We call this function until we
+             * successfully get a block to process, or finished reading
+             * all the data (all 'segment' files) for this relation.
+             */
+            while(!getNextRowGroup(scan))
+            {
+                /* have we read all this relation's data. done! */
+                if(scan->pqs_done_all_splits)
+                {
+                    ExecClearTuple(slot);
+                    return /*NULL*/;
+                }
+            }
+
+            scan->bufferDone = false;
+        }
+
+        if (isfiltered) {
+            scan->bufferDone = true;
+            continue;
+        }
+
+        bool tupleExist = ParquetRowGroupReader_ScanNextTuple(
+                scan->pqs_tupDesc,
+                &scan->rowGroupReader,
+                scan->hawqAttrToParquetColChunks,
+                scan->proj,
+                slot);
+
+        if(tupleExist)
+        {
+            int segno = ((FileSplitNode *)list_nth(scan->splits, scan->pqs_splits_processed - 1))->segno;
+            AOTupleIdInit_Init(&aoTupleId);
+            AOTupleIdInit_segmentFileNum(&aoTupleId,
+                                         segno);
+
+            scan->cur_seg_row++;
+            AOTupleIdInit_rowNum(&aoTupleId, scan->cur_seg_row);
+
+            scan->cdb_fake_ctid = *((ItemPointer)&aoTupleId);
+
+            slot_set_ctid(slot, &(scan->cdb_fake_ctid));
+
+            return;
+        }
+        /* no more items in the row group, get new buffer */
+        scan->bufferDone = true;
+    }
+}
+
+void parquet_getnext_withfilter(ParquetScanDesc scan, ScanDirection direction,
+		TupleTableSlot *slot, ScanState *node) {
 
 	AOTupleId aoTupleId;
 	Assert(ScanDirectionIsForward(direction));
@@ -276,6 +348,7 @@ void parquet_getnext(ParquetScanDesc scan, ScanDirection direction,
 
 	for(;;)
 	{
+        bool isfiltered = false;
 		if(scan->bufferDone)
 		{
 			/*
@@ -283,7 +356,7 @@ void parquet_getnext(ParquetScanDesc scan, ScanDirection direction,
 			 * successfully get a block to process, or finished reading
 			 * all the data (all 'segment' files) for this relation.
 			 */
-			while(!getNextRowGroup(scan))
+            while(!getNextRowGroupWithFilter(scan, slot, node, &isfiltered))
 			{
 				/* have we read all this relation's data. done! */
 				if(scan->pqs_done_all_splits)
@@ -294,6 +367,11 @@ void parquet_getnext(ParquetScanDesc scan, ScanDirection direction,
 			}
 
 			scan->bufferDone = false;
+		}
+
+		if (isfiltered) {
+            scan->bufferDone = true;
+			continue;
 		}
 
 		bool tupleExist = ParquetRowGroupReader_ScanNextTuple(
@@ -329,6 +407,48 @@ void parquet_getnext(ParquetScanDesc scan, ScanDirection direction,
  */
 static bool getNextRowGroup(ParquetScanDesc scan)
 {
+    if (scan->pqs_need_new_split)
+    {
+        /*
+         * Need to open a new segment file.
+         */
+        if(!SetNextFileSegForRead(scan))
+            return false;
+
+        scan->cur_seg_row = 0;
+    }
+
+    FileSplit split = (FileSplitNode *)list_nth(scan->splits, scan->pqs_splits_processed-1);
+
+    if (ParquetRowGroupReader_GetRowGroupInfo(
+            split,
+            &scan->storageRead,
+            &scan->rowGroupReader,
+            scan->proj,
+            scan->pqs_tupDesc,
+            scan->hawqAttrToParquetColChunks,
+            scan->toCloseFile)) {
+        ParquetRowGroupReader_GetContents(&scan->rowGroupReader);
+
+    }
+    else {
+        /* current split is finished */
+        scan->pqs_need_new_split = true;
+        /* if done with reading the segment file */
+        if (scan->toCloseFile) {
+            CloseScannedFileSeg(scan);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/*
+ * You can think of this scan routine as get next "executor" Parquet rowGroup.
+ */
+static bool getNextRowGroupWithFilter(ParquetScanDesc scan, TupleTableSlot *slot, ScanState *node, bool *isfiltered)
+{
 	if (scan->pqs_need_new_split)
 	{
 		/*
@@ -350,7 +470,14 @@ static bool getNextRowGroup(ParquetScanDesc scan)
 												scan->pqs_tupDesc,
 												scan->hawqAttrToParquetColChunks,
 												scan->toCloseFile)) {
-		ParquetRowGroupReader_GetContents(&scan->rowGroupReader);
+		if (!dofilter(slot, &scan->rowGroupReader, node)) {
+			ParquetRowGroupReader_GetContents(&scan->rowGroupReader);
+			*isfiltered = false;
+		} else {
+            scan->rowGroupReader.storageRead->rowGroupProcessedCount++;
+			*isfiltered = true;
+			return true;
+		}
 	}
 	else {
 		/* current split is finished */
@@ -363,6 +490,46 @@ static bool getNextRowGroup(ParquetScanDesc scan)
 	}
 
 	return true;
+}
+
+static bool dofilter(TupleTableSlot *slot, ParquetRowGroupReader *rowGroupReader, ScanState *node)
+{
+    TupleTableSlot minslot = *slot;
+    TupleTableSlot maxslot = *slot;
+
+    int natts = slot->tts_tupleDescriptor->natts;
+
+    Datum *minvalues = (Datum *)palloc(sizeof(Datum)* natts);
+    Datum *maxvalues = (Datum *)palloc(sizeof(Datum)* natts);
+    minslot.PRIVATE_tts_values = minvalues;
+    maxslot.PRIVATE_tts_values = maxvalues;
+
+    for(int i = 0; i < rowGroupReader->columnReaderCount; i++){
+    //for(int i = 0; i < natts; i++){
+        maxvalues[i] = rowGroupReader->columnReaders[i].columnMetadata->stats.max;
+        minvalues[i] = rowGroupReader->columnReaders[i].columnMetadata->stats.min;
+        //elog(NOTICE,"minvalues[%d]=%ld, maxvalues[%d]=%ld\n", i, minvalues[i], i, maxvalues[i]);
+    }
+
+	/*construct tuple, and return back*/
+	TupSetVirtualTupleNValid(&minslot, natts);
+	TupSetVirtualTupleNValid(&maxslot, natts);
+
+	ExprContext minecontext = *node->ps.ps_ExprContext;
+	ExprContext maxecontext = *node->ps.ps_ExprContext;
+	List	   *qual = node->ps.qual;
+	ResetExprContext(&minecontext);
+	minecontext.ecxt_scantuple = &minslot;
+	ResetExprContext(&maxecontext);
+	maxecontext.ecxt_scantuple = &maxslot;
+
+	if ((!ExecQual(qual, &minecontext, true)) && (!ExecQual(qual, &maxecontext, true))) {
+        elog(NOTICE,"skip: minvalues[0]=%ld, maxvalues[0]=%ld\n", minecontext.ecxt_scantuple->PRIVATE_tts_values[0], maxecontext.ecxt_scantuple->PRIVATE_tts_values[0]);
+        return true;
+    }
+    elog(NOTICE,"not skip: maxvalues[0]=%ld, maxvalues[0]=%ld\n", minecontext.ecxt_scantuple->PRIVATE_tts_values[0], maxecontext.ecxt_scantuple->PRIVATE_tts_values[0]);
+
+	return false;
 }
 
 /*

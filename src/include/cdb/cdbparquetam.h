@@ -150,6 +150,12 @@ extern void parquet_getnext(
 		ScanDirection direction,
 		TupleTableSlot *slot);
 
+extern void parquet_getnext_withfilter(
+		ParquetScanDesc scan,
+		ScanDirection direction,
+		TupleTableSlot *slot,
+		ScanState *node);
+
 extern ParquetInsertDesc parquet_insert_init(
 		Relation rel,
 		ResultRelSegFileInfo *segfileinfo);

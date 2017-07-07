@@ -206,90 +206,7 @@ ParquetRowGroupReader_ScanNextTuple(
 	ParquetRowGroupReader	*rowGroupReader,
 	int						*hawqAttrToParquetColNum,
 	bool 					*projs,
-	TupleTableSlot 			*slot)
-{
-	Assert(slot);
-
-	if (rowGroupReader->rowRead >= rowGroupReader->rowCount)
-	{
-		//TODO: interma 一起consume?齐步走（不行，因为每个column的page数目不一定一样，但tuplecount一定一致）
-		ParquetRowGroupReader_FinishedScanRowGroup(rowGroupReader);
-		return false;
-	}
-
-	/*
-	 * get the next item (tuple) from the row group
-	 */
-	rowGroupReader->rowRead++;
-
-	int natts = slot->tts_tupleDescriptor->natts;
-	Assert(natts <=	tupDesc->natts);
-
-	Datum *values = slot_get_values(slot);
-	bool *nulls = slot_get_isnull(slot);
-
-	int colReaderIndex = 0;
-	for(int i = 0; i < natts; i++)
-	{
-		if(projs[i] == false)
-		{
-			nulls[i] = true;
-			continue;
-		}
-
-		ParquetColumnReader *nextReader =
-			&rowGroupReader->columnReaders[colReaderIndex];
-		int hawqTypeID = tupDesc->attrs[i]->atttypid;
-
-		if(hawqAttrToParquetColNum[i] == 1)
-		{
-			ParquetColumnReader_readValue(nextReader, &values[i], &nulls[i], hawqTypeID);
-		}
-		else
-		{
-			/*
-			 * Because there are some memory reused inside the whole column reader, so need
-			 * to switch the context from PerTupleContext to rowgroup->context
-			 */
-			MemoryContext oldContext = MemoryContextSwitchTo(rowGroupReader->memoryContext);
-
-			switch(hawqTypeID)
-			{
-				case HAWQ_TYPE_POINT:
-					ParquetColumnReader_readPoint(nextReader, &values[i], &nulls[i]);
-					break;
-				case HAWQ_TYPE_PATH:
-					ParquetColumnReader_readPATH(nextReader, &values[i], &nulls[i]);
-					break;
-				case HAWQ_TYPE_LSEG:
-					ParquetColumnReader_readLSEG(nextReader, &values[i], &nulls[i]);
-					break;
-				case HAWQ_TYPE_BOX:
-					ParquetColumnReader_readBOX(nextReader, &values[i], &nulls[i]);
-					break;
-				case HAWQ_TYPE_CIRCLE:
-					ParquetColumnReader_readCIRCLE(nextReader, &values[i], &nulls[i]);
-					break;
-				case HAWQ_TYPE_POLYGON:
-					ParquetColumnReader_readPOLYGON(nextReader, &values[i], &nulls[i]);
-					break;
-				default:
-					/* TODO array type */
-					/* TODO UDT */
-					Insist(false);
-					break;
-			}
-
-			MemoryContextSwitchTo(oldContext);
-		}
-
-		colReaderIndex += hawqAttrToParquetColNum[i];
-	}
-
-	/*construct tuple, and return back*/
-	TupSetVirtualTupleNValid(slot, natts);
-	return true;
-}
+	TupleTableSlot 			*slot);
 
 /**
  * finish scanning row group, but keeping the structure palloced
@@ -333,4 +250,89 @@ static bool ParquetRowGroupReader_Select(FileSplit split,
     *rowGroupInfoProcessed = true;
 
   return false;
+}
+
+bool ParquetRowGroupReader_ScanNextTuple(TupleDesc tupDesc, ParquetRowGroupReader *rowGroupReader,
+                                         int *hawqAttrToParquetColNum, bool *projs, TupleTableSlot *slot) {
+    Assert(slot);
+
+    if (rowGroupReader->rowRead >= rowGroupReader->rowCount)
+    {
+        //TODO: interma 一起consume?齐步走（不行，因为每个column的page数目不一定一样，但tuplecount一定一致）
+        ParquetRowGroupReader_FinishedScanRowGroup(rowGroupReader);
+        return false;
+    }
+
+    /*
+     * get the next item (tuple) from the row group
+     */
+    rowGroupReader->rowRead++;
+
+    int natts = slot->tts_tupleDescriptor->natts;
+    Assert(natts <=	tupDesc->natts);
+
+    Datum *values = slot_get_values(slot);
+    bool *nulls = slot_get_isnull(slot);
+
+    int colReaderIndex = 0;
+    for(int i = 0; i < natts; i++)
+    {
+        if(projs[i] == false)
+        {
+            nulls[i] = true;
+            continue;
+        }
+
+        ParquetColumnReader *nextReader =
+                &rowGroupReader->columnReaders[colReaderIndex];
+        int hawqTypeID = tupDesc->attrs[i]->atttypid;
+
+        if(hawqAttrToParquetColNum[i] == 1)
+        {
+            ParquetColumnReader_readValue(nextReader, &values[i], &nulls[i], hawqTypeID);
+        }
+        else
+        {
+            /*
+             * Because there are some memory reused inside the whole column reader, so need
+             * to switch the context from PerTupleContext to rowgroup->context
+             */
+            MemoryContext oldContext = MemoryContextSwitchTo(rowGroupReader->memoryContext);
+
+            switch(hawqTypeID)
+            {
+                case HAWQ_TYPE_POINT:
+                    ParquetColumnReader_readPoint(nextReader, &values[i], &nulls[i]);
+                    break;
+                case HAWQ_TYPE_PATH:
+                    ParquetColumnReader_readPATH(nextReader, &values[i], &nulls[i]);
+                    break;
+                case HAWQ_TYPE_LSEG:
+                    ParquetColumnReader_readLSEG(nextReader, &values[i], &nulls[i]);
+                    break;
+                case HAWQ_TYPE_BOX:
+                    ParquetColumnReader_readBOX(nextReader, &values[i], &nulls[i]);
+                    break;
+                case HAWQ_TYPE_CIRCLE:
+                    ParquetColumnReader_readCIRCLE(nextReader, &values[i], &nulls[i]);
+                    break;
+                case HAWQ_TYPE_POLYGON:
+                    ParquetColumnReader_readPOLYGON(nextReader, &values[i], &nulls[i]);
+                    break;
+                default:
+                    /* TODO array type */
+                    /* TODO UDT */
+                    Insist(false);
+                    break;
+            }
+
+            MemoryContextSwitchTo(oldContext);
+        }
+
+        colReaderIndex += hawqAttrToParquetColNum[i];
+    }
+
+    /*construct tuple, and return back*/
+    TupSetVirtualTupleNValid(slot, natts);
+    return true;
 }

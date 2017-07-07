@@ -87,7 +87,8 @@ ParquetScanNext(ScanState *scanState)
 	Assert(node->opaque != NULL &&
 		   node->opaque->scandesc != NULL);
 
-	parquet_getnext(node->opaque->scandesc, node->ss.ps.state->es_direction, node->ss.ss_ScanTupleSlot);
+	parquet_getnext_withfilter(node->opaque->scandesc, node->ss.ps.state->es_direction, node->ss.ss_ScanTupleSlot, node);
+	//parquet_getnext(node->opaque->scandesc, node->ss.ps.state->es_direction, node->ss.ss_ScanTupleSlot);
 	return node->ss.ss_ScanTupleSlot;
 }
 
