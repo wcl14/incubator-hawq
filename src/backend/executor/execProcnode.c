@@ -976,7 +976,11 @@ Exec_Jmp_Sort:
 	goto Exec_Jmp_Done;
 
 Exec_Jmp_Agg:
-	result = ExecAgg((AggState *) node);
+	if (NULL != agg_hook) {
+		result = ExecAgg((AggState *) node);
+	} else {
+		result = ExecAggByRowGroup((AggState *) node);
+	}
 	goto Exec_Jmp_Done;
 
 Exec_Jmp_Unique:

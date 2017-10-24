@@ -78,6 +78,8 @@ typedef struct ParquetFormatScan{
     TupleTableSlot          *slot;
     Lineitem4Query1         *readTuples;
     int         readTuplesNum;
+    Datum       **slots_values;
+    bool        **slots_nulls;
 } ParquetFormatScan;
 
 typedef struct FormData_pg_aoseg{
@@ -88,6 +90,22 @@ typedef struct FormData_pg_aoseg{
 } FormData_pg_aoseg;
 
 typedef struct FormData_pg_aoseg *Form_pg_aoseg;
+
+typedef struct AggStatePerGroupData
+{
+    Datum       *transValue;     /* current transition value */
+    bool        *transValueIsNull;
+
+    bool        *noTransValue;   /* true if transValue not set yet */
+
+    /*
+     * Note: noTransValue initially has the same value as transValueIsNull,
+     * and if true both are cleared to false at the same time.  They are not
+     * the same though: if transfn later returns a NULL, we want to keep that
+     * NULL and not auto-replace it with a later input value. Only the first
+     * non-NULL input will be auto-substituted.
+     */
+} AggStatePerGroupData;
 
 int	total_tuples_num = 0;
 int	result_num = 0;

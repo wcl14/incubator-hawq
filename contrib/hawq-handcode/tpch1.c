@@ -366,16 +366,74 @@ static void ReadTupleSlotFromRowGroup(ParquetRowGroupReader *rowGroupReader, Tup
         }
         colReaderIndex += hawqAttrToParquetColChunks[i];
     }
+}
 
-/*
-    elog(NOTICE, "readTuples[%d].l_quantity=%lf", total_tuples_num, readTuples[total_tuples_num].l_quantity);
-    elog(NOTICE, "readTuples[%d].l_extendedprice=%lf", total_tuples_num, readTuples[total_tuples_num].l_extendedprice);
-    elog(NOTICE, "readTuples[%d].l_discount=%lf", total_tuples_num, readTuples[total_tuples_num].l_discount);
-    elog(NOTICE, "readTuples[%d].l_tax=%lf", total_tuples_num, readTuples[total_tuples_num].l_tax);
-    elog(NOTICE, "readTuples[%d].l_returnflag=%c", total_tuples_num, readTuples[total_tuples_num].l_returnflag);
-    elog(NOTICE, "readTuples[%d].l_linestatus=%c", total_tuples_num, readTuples[total_tuples_num].l_linestatus);
-    elog(NOTICE, "readTuples[%d].l_shipdate=%s", total_tuples_num, readTuples[total_tuples_num].l_shipdate);
-*/
+static void ReadTupleSlotsFromRowGroup(ParquetRowGroupReader *rowGroupReader, Datum **slots_values, 
+        bool **slots_null, TupleDesc pqs_tupDesc, int *hawqAttrToParquetColChunks)
+{
+    /*
+     * get the next item (tuple) from the row group
+     */
+    rowGroupReader->rowRead++;
+
+    int colReaderIndex = 0;
+    for(int i = 0; i < pqs_tupDesc->natts; i++)
+    {
+        if(projs[i] == false)
+        {
+            nulls[i] = true;
+            continue;
+        }
+
+        ParquetColumnReader *nextReader =
+            &rowGroupReader->columnReaders[colReaderIndex];
+        int hawqTypeID = pqs_tupDesc->attrs[i]->atttypid;
+
+        if(hawqAttrToParquetColChunks[i] == 1)
+        {
+            for (int j = 0; j < rowGroupReader->rowCount; j++)
+            {
+                ParquetColumnReader_readValue(nextReader, &slots_values[i][j], &slots_nulls[i][j], hawqTypeID);
+            }
+        }
+        else
+        {
+            for (int j = 0; j < rowGroupReader->rowCount; j++)
+            {
+                /*
+                 * Because there are some memory reused inside the whole column reader, so need
+                 * to switch the context from PerTupleContext to rowgroup->context
+                 */
+                switch(hawqTypeID)
+                {
+                    case HAWQ_TYPE_POINT:
+                        ParquetColumnReader_readPoint(nextReader, &values[i][j], &nulls[i][j]);
+                        break;
+                    case HAWQ_TYPE_PATH:
+                        ParquetColumnReader_readPATH(nextReader, &values[i][j], &nulls[i][j]);
+                        break;
+                    case HAWQ_TYPE_LSEG:
+                        ParquetColumnReader_readLSEG(nextReader, &values[i][j], &nulls[i][j]);
+                        break;
+                    case HAWQ_TYPE_BOX:
+                        ParquetColumnReader_readBOX(nextReader, &values[i][j], &nulls[i][j]);
+                        break;
+                    case HAWQ_TYPE_CIRCLE:
+                        ParquetColumnReader_readCIRCLE(nextReader, &values[i][j], &nulls[i][j]);
+                        break;
+                    case HAWQ_TYPE_POLYGON:
+                        ParquetColumnReader_readPOLYGON(nextReader, &values[i][j], &nulls[i][j]);
+                        break;
+                    default:
+                        /* TODO array type */
+                        /* TODO UDT */
+                        Insist(false);
+                        break;
+                }
+            }
+        }
+        colReaderIndex += hawqAttrToParquetColChunks[i];
+    }
 }
 
 static void GetTupleValueFromSlot(TupleTableSlot *slot, Lineitem4Query1 *readTuple)
@@ -567,6 +625,78 @@ static void DoTPCHQuery1()
 {
     DoQuery1Aggregate();
     DoQuery1Gather();
+}
+
+}
+
+TupleTableSlot *
+ExecAggByRowGroup(AggState *aggstate)
+{
+    if (aggstate->agg_done)
+    {
+        ExecEagerFreeAgg(aggstate);
+        return NULL;
+    }
+
+
+    Assert(((Agg *) aggstate->ss.ps.plan)->aggstrategy == AGG_PLAIN);
+
+    if (aggstate->agg_done)
+    {
+            return NULL;
+    }
+
+    Assert(aggstate->aggType == AggTypeScalar);
+
+    AggStatePerAgg peragg = aggstate->peragg;
+    AggStatePerGroup pergroup = aggstate->pergroup ;
+
+    initialize_aggregates(aggstate, peragg, pergroup, &(aggstate->mem_manager));
+
+    scan->slots_values = (Datum **) malloc (MAX_TUPLE_NUM * scan->pqs_tupDesc->natts * sizeof(Datum));
+    scan->slots_nulls = (bool **) malloc (MAX_TUPLE_NUM * scan->pqs_tupDesc->natts * sizeof(bool));
+    /*
+     * We loop through input tuples, and compute the aggregates.
+     */
+    while (!aggstate->agg_done)
+    {
+        ExprContext *tmpcontext = aggstate->tmpcontext;
+        /* Reset the per-input-tuple context */
+        ResetExprContext(tmpcontext);
+        PlanState *outerPlan = outerPlanState(aggstate);
+        //TupleTableSlot *outerslot = ExecProcaggstate(outerPlan);
+        ReadTupleSlotsFromRowGroup(&scan->rowGroupReader, scan->slots_values, scan->slots_nulls, scan->pqs_tupDesc, scan->hawqAttrToParquetColChunks);
+        if (TupIsNull(outerslot))
+        {
+            aggstate->agg_done = true;
+            break;
+        }
+        Gpmon_M_Incr(GpmonPktFromAggState(aggstate), GPMON_QEXEC_M_ROWSIN);
+        CheckSendPlanStateGpmonPkt(&aggstate->ss.ps);
+
+        tmpcontext->ecxt_scantuple = outerslot;
+        advance_aggregates(aggstate, pergroup, &(aggstate->mem_manager));
+    }
+
+    finalize_aggregates(aggstate, pergroup);
+
+    ExprContext *econtext = aggstate->ss.ps.ps_ExprContext;
+    Agg *node = (Agg*)aggstate->ss.ps.plan;
+    econtext->grouping = node->grouping;
+    econtext->group_id = node->rollupGSTimes;
+    /* Check the qual (HAVING clause). */
+    if (ExecQual(aggstate->ss.ps.qual, econtext, false))
+    {
+        Gpmon_M_Incr_Rows_Out(GpmonPktFromAggState(aggstate));
+        CheckSendPlanStateGpmonPkt(&aggstate->ss.ps);
+
+        /*
+         * Form and return a projection tuple using the aggregate results
+         * and the representative input tuple.
+         */
+        return ExecProject(aggstate->ss.ps.ps_ProjInfo, NULL);
+    }
+    return NULL;
 }
 
 Datum runtpch1(PG_FUNCTION_ARGS)
